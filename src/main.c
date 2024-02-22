@@ -23,49 +23,76 @@ SDL_Surface* window_surface = NULL;
 #define MATRIX_WIDTH 128
 #define MATRIX_HEIGHT 64
 
-#define TOTAL_BYTES (128*128 + 4*128)*3
-
 static unsigned short s_KeyQueue[KEYQUEUE_SIZE];
 static unsigned int s_KeyQueueWriteIndex = 0;
 static unsigned int s_KeyQueueReadIndex = 0;
 
+#define TOTAL_BYTES (128*128 + 4*128)*3
+#define SOCKET_NAME "/tmp/screen.socket"
+
+int sock_client;
+int sock_ret;
+struct sockaddr_un addr;
 uint8_t send_buf[TOTAL_BYTES];
 
 
 static unsigned char convertToDoomKey(unsigned int key){
+  // keypad bindings:
+  // backspace - escape
+  // 8456 - ULDR
+  // 1 - strafe
+  // del - fire
+  // 9 - use
+  // 3 - run
+  // minus - y
+
   switch (key)
     {
+    case SDLK_KP_MINUS:
+      key = 'y';
+      break;
     case SDLK_RETURN:
+    case SDLK_KP_ENTER:
       key = KEY_ENTER;
       break;
     case SDLK_ESCAPE:
+    case SDLK_KP_BACKSPACE:
+    case SDLK_BACKSPACE:
       key = KEY_ESCAPE;
       break;
     case SDLK_LEFT:
+    case SDLK_KP_4:
       key = KEY_LEFTARROW;
       break;
     case SDLK_RIGHT:
+    case SDLK_KP_6:
       key = KEY_RIGHTARROW;
       break;
     case SDLK_UP:
+    case SDLK_KP_8:
       key = KEY_UPARROW;
       break;
     case SDLK_DOWN:
+    case SDLK_KP_5:
       key = KEY_DOWNARROW;
       break;
     case SDLK_LCTRL:
     case SDLK_RCTRL:
+    case SDLK_KP_PERIOD:
       key = KEY_FIRE;
       break;
     case SDLK_SPACE:
+    case SDLK_KP_9:
       key = KEY_USE;
       break;
     case SDLK_LSHIFT:
     case SDLK_RSHIFT:
+    case SDLK_KP_3:
       key = KEY_RSHIFT;
       break;
     case SDLK_LALT:
     case SDLK_RALT:
+    case SDLK_KP_1:
       key = KEY_LALT;
       break;
     case SDLK_F2:
@@ -162,11 +189,53 @@ void DG_Init(){
   renderer =  SDL_CreateSoftwareRenderer(window_surface);
 }
 
+void socketSend(){
+  uint32_t *pix = matrix_surface->pixels;
+  int i = 0;
+
+  for(int y = 0; y < MATRIX_HEIGHT; y++){
+    for(int x = 0; x < MATRIX_WIDTH; x++){
+      
+      send_buf[i] = *pix >> 16;   // R
+      send_buf[i+(MATRIX_WIDTH*3)] = *pix >> 16;   // R
+      i++;
+      send_buf[i] = *pix >> 8;    // G
+      send_buf[i+(MATRIX_WIDTH*3)] = *pix >> 8;    // G
+      i++;
+      send_buf[i] = *pix & 0xFF;  // B
+      send_buf[i+(MATRIX_WIDTH*3)] = *pix & 0xFF;    // B
+      i++;
+
+
+      pix++;
+    }
+    i += (MATRIX_WIDTH*3);
+  }
+
+
+  // send corner pixel color to LEDs
+  pix--; // go back to last pixel. probably not safe code
+
+  for(int l = 0; l < 128*4; l++){
+    send_buf[i] = *pix >> 16; // R
+    i++;
+    send_buf[i] = *pix >> 8; // G
+    i++;
+    send_buf[i] = *pix & 0xFF; // B
+    i++;
+  }
+
+  sock_ret = write(sock_client, send_buf, TOTAL_BYTES);
+}
+
+
 void DG_DrawFrame()
 {
   memcpy(window_surface->pixels, DG_ScreenBuffer, sizeof(uint32_t)*DOOMGENERIC_RESX*DOOMGENERIC_RESY); // quickly copy doom framebuffer to window surface
   SDL_BlitScaled(window_surface, NULL, matrix_surface, NULL);
   SDL_UpdateWindowSurface(window);
+
+  socketSend();
 
   handleKeyInput();
 }
@@ -209,13 +278,30 @@ void DG_SetWindowTitle(const char * title)
 
 int main(int argc, char **argv)
 {
-    doomgeneric_Create(argc, argv);
+  // create socket
+  sock_client = socket(AF_UNIX, SOCK_STREAM, 0);
+  if(sock_client == -1){
+    perror("socket");
+    exit(1);
+  }
 
-    for (int i = 0; ; i++)
-    {
-        doomgeneric_Tick();
-    }
-    
+  // connect socket to address
+  addr.sun_family = AF_UNIX;
+  strcpy(addr.sun_path, SOCKET_NAME);
 
-    return 0;
+  sock_ret = connect(sock_client, (const struct sockaddr *) &addr, sizeof(struct sockaddr_un));
+  if (sock_ret == -1) {
+        fprintf(stderr, "Unable to connect to socket.\n");
+        exit(1);
+  }
+
+  doomgeneric_Create(argc, argv);
+
+  for (int i = 0; ; i++)
+  {
+      doomgeneric_Tick();
+  }
+  
+
+  return 0;
 }
