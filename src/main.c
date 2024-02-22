@@ -10,15 +10,27 @@
 #include <stdbool.h>
 #include <SDL.h>
 
+#include <sys/socket.h>
+#include <sys/un.h>
+
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
-SDL_Texture* texture;
+SDL_Surface* matrix_surface = NULL;
+SDL_Surface* window_surface = NULL;
 
 #define KEYQUEUE_SIZE 16
+
+#define MATRIX_WIDTH 128
+#define MATRIX_HEIGHT 64
+
+#define TOTAL_BYTES (128*128 + 4*128)*3
 
 static unsigned short s_KeyQueue[KEYQUEUE_SIZE];
 static unsigned int s_KeyQueueWriteIndex = 0;
 static unsigned int s_KeyQueueReadIndex = 0;
+
+uint8_t send_buf[TOTAL_BYTES];
+
 
 static unsigned char convertToDoomKey(unsigned int key){
   switch (key)
@@ -140,23 +152,21 @@ void DG_Init(){
                             SDL_WINDOW_SHOWN
                             );
 
-  // Setup renderer
-  renderer =  SDL_CreateRenderer( window, -1, SDL_RENDERER_ACCELERATED);
-  // Clear winow
-  SDL_RenderClear( renderer );
-  // Render the rect to the screen
-  SDL_RenderPresent(renderer);
+  window_surface = SDL_GetWindowSurface(window); // get window surface
+  matrix_surface = SDL_CreateRGBSurface(0, MATRIX_WIDTH, MATRIX_HEIGHT, 32, 0, 0, 0, 0); // create matrix surface
 
-  texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_TARGET, DOOMGENERIC_RESX, DOOMGENERIC_RESY);
+  SDL_SetSurfaceBlendMode(window_surface, SDL_BLENDMODE_NONE); // disable alpha blending
+  SDL_SetSurfaceBlendMode(matrix_surface, SDL_BLENDMODE_NONE);
+
+  // Setup renderer
+  renderer =  SDL_CreateSoftwareRenderer(window_surface);
 }
 
 void DG_DrawFrame()
 {
-  SDL_UpdateTexture(texture, NULL, DG_ScreenBuffer, DOOMGENERIC_RESX*sizeof(uint32_t));
-
-  SDL_RenderClear(renderer);
-  SDL_RenderCopy(renderer, texture, NULL, NULL);
-  SDL_RenderPresent(renderer);
+  memcpy(window_surface->pixels, DG_ScreenBuffer, sizeof(uint32_t)*DOOMGENERIC_RESX*DOOMGENERIC_RESY); // quickly copy doom framebuffer to window surface
+  SDL_BlitScaled(window_surface, NULL, matrix_surface, NULL);
+  SDL_UpdateWindowSurface(window);
 
   handleKeyInput();
 }

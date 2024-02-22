@@ -32,7 +32,6 @@ $(BUILD_DIR)/%.c.o: %.c
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(TARGET_EXEC)
-	$(MAKE) -C $(RGB_LIBDIR) clean
 
 FORCE:
 .PHONY: FORCE
